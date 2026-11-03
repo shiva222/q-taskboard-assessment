@@ -25,6 +25,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const existing = await prisma.task.findUnique({ where: { id } });
   if (!existing) return notFound("task not found");
+// check if assignee has access to the project   Fix-1
+  const assigneeId = parsed.data.assigneeId;
+  if (assigneeId != null) {
+    const assigneeMembership = await getProjectMembership(assigneeId, existing.projectId);
+    if (!assigneeMembership) {
+      return forbidden("assignee does not have access to this project");
+    }
+  }
 
   const task = await prisma.task.update({
     where: { id },

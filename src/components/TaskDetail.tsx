@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api-client";
-import type { ApiTask, ApiProjectMember, TaskStatus } from "@/types";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch, getStoredUser } from "@/lib/api-client";
+import type { ApiComment, ApiTask, ApiProjectMember, Role, TaskStatus } from "@/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/types";
 
 type Props = {
@@ -20,6 +20,38 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
   const [status, setStatus] = useState<TaskStatus>(task.status);
   const [assigneeId, setAssigneeId] = useState<string>(task.assigneeId ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const user = getStoredUser();
+    const mine = members.find((m) => m.user.id === user?.id);
+    setRole(mine?.role ?? null);
+  }, [members]);
+
+  const canPost = role === "admin" || role === "member";
+
+  const commentsQuery = useQuery({
+    queryKey: ["task-comments", task.id],
+    queryFn: () =>
+      apiFetch<{ comments: ApiComment[] }>(`/api/tasks/${task.id}/comments`),
+  });
+
+  const postComment = useMutation({
+    mutationFn: (body: string) =>
+      apiFetch<{ comment: ApiComment }>(`/api/tasks/${task.id}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      }),
+    onSuccess: () => {
+      setCommentBody("");
+      setCommentError(null);
+      queryClient.invalidateQueries({ queryKey: ["task-comments", task.id] });
+    },
+    onError: (err) =>
+      setCommentError(err instanceof Error ? err.message : "comment failed"),
+  });
 
   const updateTask = useMutation({
     mutationFn: (input: Partial<ApiTask>) =>
@@ -60,7 +92,7 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-surface border border-border rounded-lg p-6"
+        className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-surface border border-border rounded-lg p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -128,6 +160,73 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
             {error}
           </p>
         )}
+
+        <section className="mb-4 border-t border-border pt-4">
+          <h3 className="text-sm font-medium mb-3">comments</h3>
+          {commentsQuery.isLoading && (
+            <p className="text-xs text-muted">loading…</p>
+          )}
+          {commentsQuery.error && (
+            <p className="text-sm text-red-400" role="alert">
+              {commentsQuery.error instanceof Error
+                ? commentsQuery.error.message
+                : "failed to load comments"}
+            </p>
+          )}
+          {commentsQuery.data && commentsQuery.data.comments.length === 0 && (
+            <p className="text-xs text-muted italic">no comments yet</p>
+          )}
+          {commentsQuery.data && commentsQuery.data.comments.length > 0 && (
+            <ul className="space-y-3 max-h-48 overflow-y-auto">
+              {commentsQuery.data.comments.map((comment) => (
+                <li key={comment.id} className="text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-medium">{comment.author.name}</span>
+                    <time className="text-xs text-muted shrink-0" dateTime={comment.createdAt}>
+                      {new Date(comment.createdAt).toLocaleString()}
+                    </time>
+                  </div>
+                  <p className="text-xs text-muted">{comment.author.email}</p>
+                  <p className="mt-1 whitespace-pre-wrap">{comment.body}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {canPost && (
+            <form
+              className="mt-3 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const body = commentBody.trim();
+                if (!body) return;
+                setCommentError(null);
+                postComment.mutate(body);
+              }}
+            >
+              <input
+                type="text"
+                value={commentBody}
+                onChange={(e) => setCommentBody(e.target.value)}
+                placeholder="add a comment"
+                maxLength={5000}
+                className="flex-1 rounded-md bg-bg border border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={postComment.isPending || commentBody.trim().length === 0}
+                className="text-sm px-4 py-2 rounded-md bg-accent text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {postComment.isPending ? "posting…" : "post"}
+              </button>
+            </form>
+          )}
+          {commentError && (
+            <p className="text-sm text-red-400 mt-2" role="alert">
+              {commentError}
+            </p>
+          )}
+        </section>
 
         <div className="flex items-center justify-between gap-3">
           <button

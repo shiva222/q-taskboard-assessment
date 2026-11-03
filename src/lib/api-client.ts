@@ -42,7 +42,10 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const data = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
-    const message = (data && (data.error as string)) || `request failed (${res.status})`;
+    const message =
+      (data && typeof data.message === "string" && data.message) ||
+      (data && (data.error as string)) ||
+      `request failed (${res.status})`;
     throw new Error(message);
   }
   return data as T;
